@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Large datasets
+*.tar
+*.tar.gz
+*.zip
+*.7z
+data/
+dataset/
+datasets/
+
+# ML artifacts / checkpoints
+*.pt
+*.pth
+*.onnx
+*.engine
+runs/
+checkpoints/
+
+# Local files
+.DS_Store
+Thumbs.db
