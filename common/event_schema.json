@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "UrbanSense Event",
+  "type": "object",
+  "required": ["event_id", "event_type", "bus_id", "timestamp", "latitude", "longitude", "confidence"],
+  "properties": {
+    "event_id": {"type": "string"},
+    "event_type": {"type": "string"},
+    "bus_id": {"type": "string"},
+    "camera_id": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "latitude": {"type": "number"},
+    "longitude": {"type": "number"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "severity": {"type": "string"},
+    "evidence_url": {"type": "string"},
+    "vehicle_count": {"type": "integer", "minimum": 0},
+    "plate_number": {"type": "string"},
+    "plate_confidence": {"type": "number", "minimum": 0, "maximum": 1}
+  }
+}
