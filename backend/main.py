@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from schemas.events import EventBatch
+from backend.schemas.events import EventBatch
 
 app = FastAPI(
     title="UrbanSense API",
