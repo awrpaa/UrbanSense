@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -12,7 +13,7 @@ from backend.services.tomtom import flow_segment
 
 app = FastAPI(
     title="UrbanSense API",
-    version="0.4.0",
+    version="0.5.0",
     description="Unified API for UrbanSense road, traffic and MVA intelligence.",
 )
 
@@ -25,6 +26,19 @@ app.add_middleware(
 )
 
 pipeline = build_pipeline()
+
+KOLKATA_TRAFFIC_POINTS = {
+    "AJC Bose Road": (22.5456, 88.3530),
+    "Park Street": (22.5535, 88.3510),
+    "EM Bypass": (22.5120, 88.4000),
+    "VIP Road": (22.6100, 88.4100),
+    "Jadavpur": (22.4970, 88.3690),
+    "Howrah Bridge": (22.5850, 88.3420),
+    "M G Road": (22.5720, 88.3630),
+    "Rashbehari Avenue": (22.5190, 88.3510),
+    "Jessore Road": (22.6200, 88.4300),
+    "Diamond Harbour Road": (22.5000, 88.3250),
+}
 
 
 class TrafficPoint(BaseModel):
@@ -91,6 +105,75 @@ def process_pipeline(request: ProcessRequest):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     return {"count": len(events), "events": [event.model_dump(mode="json") for event in events]}
+
+
+def _read_traffic_point(item: tuple[str, tuple[float, float]]) -> dict:
+    name, (latitude, longitude) = item
+    try:
+        data = flow_segment(latitude, longitude, timeout=8.0)
+        return {
+            "name": name,
+            "latitude": latitude,
+            "longitude": longitude,
+            **data,
+            "status": "LIVE",
+        }
+    except Exception as exc:
+        return {
+            "name": name,
+            "latitude": latitude,
+            "longitude": longitude,
+            "status": "UNAVAILABLE",
+            "error": str(exc),
+        }
+
+
+@app.get("/api/traffic/dashboard")
+def traffic_dashboard():
+    """Return a city-level snapshot from multiple TomTom traffic-flow points.
+
+    The TomTom key stays on the backend. The frontend receives only derived
+    traffic metrics and coordinates. This endpoint is intentionally polled
+    periodically rather than on every UI render.
+    """
+    results = []
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(_read_traffic_point, item) for item in KOLKATA_TRAFFIC_POINTS.items()]
+        for future in as_completed(futures):
+            results.append(future.result())
+
+    results.sort(key=lambda row: list(KOLKATA_TRAFFIC_POINTS).index(row["name"]))
+    live = [row for row in results if row.get("status") == "LIVE" and row.get("score") is not None]
+
+    average_score = round(sum(row["score"] for row in live) / len(live), 1) if live else None
+    average_speed = round(sum(row["current_speed"] for row in live) / len(live), 1) if live else None
+    average_free_flow = round(sum(row["free_flow_speed"] for row in live) / len(live), 1) if live else None
+
+    if average_score is None:
+        city_level = "UNKNOWN"
+    elif average_score < 20:
+        city_level = "LOW"
+    elif average_score < 50:
+        city_level = "MEDIUM"
+    else:
+        city_level = "HIGH"
+
+    return {
+        "source": "TOMTOM",
+        "fleet_status": "OFFLINE",
+        "city": "Kolkata",
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "refresh_hint_seconds": 120,
+        "summary": {
+            "score": average_score,
+            "level": city_level,
+            "average_speed": average_speed,
+            "average_free_flow_speed": average_free_flow,
+            "live_segments": len(live),
+            "total_segments": len(results),
+        },
+        "points": results,
+    }
 
 
 @app.post("/api/traffic/fallback")
