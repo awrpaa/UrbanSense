@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any, Callable, Iterable, Optional
 
-from schemas.events import UrbanSenseEvent
+from backend.schemas.events import UrbanSenseEvent
 
 
 class UrbanSensePipeline:
@@ -18,40 +18,23 @@ class UrbanSensePipeline:
     ) -> None:
         self.adapters = {1: tier1, 2: tier2, 3: tier3}
 
-    def process(
-        self,
-        *,
-        image: Any = None,
-        latitude: Optional[float] = None,
-        longitude: Optional[float] = None,
-        timestamp: Optional[datetime] = None,
-        bus_id: Optional[str] = None,
-        camera_id: Optional[str] = None,
-        tiers: Optional[list[int]] = None,
-    ) -> list[UrbanSenseEvent]:
+    def process(self, *, image: Any = None, latitude: Optional[float] = None,
+                longitude: Optional[float] = None, timestamp: Optional[datetime] = None,
+                bus_id: Optional[str] = None, camera_id: Optional[str] = None,
+                tiers: Optional[list[int]] = None) -> list[UrbanSenseEvent]:
         timestamp = timestamp or datetime.now(timezone.utc)
         selected = tiers or [1, 2, 3]
         events: list[UrbanSenseEvent] = []
-
         context = {
-            "image": image,
-            "latitude": latitude,
-            "longitude": longitude,
-            "timestamp": timestamp,
-            "bus_id": bus_id,
-            "camera_id": camera_id,
+            "image": image, "latitude": latitude, "longitude": longitude,
+            "timestamp": timestamp, "bus_id": bus_id, "camera_id": camera_id,
         }
-
         for tier in selected:
             adapter = self.adapters.get(tier)
-            if adapter is None:
-                continue
-            for event in adapter(**context):
-                events.append(event)
-
+            if adapter is not None:
+                events.extend(adapter(**context))
         return events
 
 
 def build_demo_pipeline() -> UrbanSensePipeline:
-    """Build a safe no-model pipeline for API/UI development."""
     return UrbanSensePipeline()
