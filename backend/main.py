@@ -1,19 +1,19 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from backend.pipeline import build_demo_pipeline
+from backend.pipeline import build_pipeline
 from backend.schemas.events import EventBatch
 from backend.services.tomtom import flow_segment
 
 app = FastAPI(
     title="UrbanSense API",
-    version="0.2.0",
+    version="0.3.0",
     description="Unified API for UrbanSense road, traffic and MVA intelligence.",
 )
 
-pipeline = build_demo_pipeline()
+pipeline = build_pipeline()
 
 
 class TrafficPoint(BaseModel):
@@ -21,13 +21,21 @@ class TrafficPoint(BaseModel):
     longitude: float = Field(ge=-180, le=180)
 
 
+class ProcessRequest(TrafficPoint):
+    tiers: list[int] = Field(default_factory=lambda: [1, 2, 3])
+    bus_id: str | None = None
+    camera_id: str | None = None
+
+
 @app.get("/api/health")
 def health():
+    enabled = [tier for tier, adapter in pipeline.adapters.items() if adapter is not None]
     return {
         "status": "ok",
         "service": "urbansense-backend",
         "pipeline": "tier1-tier2-tier3",
-        "models": "adapter-ready",
+        "enabled_tiers": enabled,
+        "models": "configured" if enabled else "not_configured",
     }
 
 
@@ -41,17 +49,19 @@ def validate_events(batch: EventBatch):
 
 
 @app.post("/api/pipeline/process")
-def process_pipeline(point: TrafficPoint):
-    """Run configured AI adapters on an input point/frame.
-
-    Model adapters are intentionally injected into UrbanSensePipeline. Until the
-    deployment weights are installed, this endpoint returns an empty event list.
-    """
-    events = pipeline.process(
-        latitude=point.latitude,
-        longitude=point.longitude,
-        timestamp=datetime.now(),
-    )
+def process_pipeline(request: ProcessRequest):
+    """Run configured adapters when the caller supplies the corresponding frame/source."""
+    try:
+        events = pipeline.process(
+            latitude=request.latitude,
+            longitude=request.longitude,
+            timestamp=datetime.now(timezone.utc),
+            bus_id=request.bus_id,
+            camera_id=request.camera_id,
+            tiers=request.tiers,
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"count": len(events), "events": [e.model_dump(mode="json") for e in events]}
 
 
