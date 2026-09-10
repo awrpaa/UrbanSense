@@ -1,21 +1,14 @@
 from datetime import datetime, timezone
+import os
 from typing import Any, Callable, Iterable, Optional
 
 from backend.schemas.events import UrbanSenseEvent
 
 
 class UrbanSensePipeline:
-    """Orchestrates Tier 1/2/3 adapters behind one event interface.
+    """Orchestrates Tier 1/2/3 adapters behind one event interface."""
 
-    Adapters are injected so the web API never needs to know model internals.
-    """
-
-    def __init__(
-        self,
-        tier1: Optional[Callable[..., Iterable[UrbanSenseEvent]]] = None,
-        tier2: Optional[Callable[..., Iterable[UrbanSenseEvent]]] = None,
-        tier3: Optional[Callable[..., Iterable[UrbanSenseEvent]]] = None,
-    ) -> None:
+    def __init__(self, tier1=None, tier2=None, tier3=None) -> None:
         self.adapters = {1: tier1, 2: tier2, 3: tier3}
 
     def process(self, *, image: Any = None, latitude: Optional[float] = None,
@@ -25,15 +18,42 @@ class UrbanSensePipeline:
         timestamp = timestamp or datetime.now(timezone.utc)
         selected = tiers or [1, 2, 3]
         events: list[UrbanSenseEvent] = []
-        context = {
-            "image": image, "latitude": latitude, "longitude": longitude,
-            "timestamp": timestamp, "bus_id": bus_id, "camera_id": camera_id,
-        }
+        context = {"image": image, "latitude": latitude, "longitude": longitude,
+                   "timestamp": timestamp, "bus_id": bus_id, "camera_id": camera_id}
         for tier in selected:
             adapter = self.adapters.get(tier)
-            if adapter is not None:
-                events.extend(adapter(**context))
+            if adapter is None:
+                continue
+            raw_events = adapter(**context)
+            for event in raw_events:
+                events.append(event if isinstance(event, UrbanSenseEvent) else UrbanSenseEvent.model_validate(event))
         return events
+
+
+def _tier1_adapter(**kwargs):
+    from ai.road_damage.inference import detect
+    return detect(**kwargs)
+
+
+def _tier2_adapter(**kwargs):
+    from ai.traffic.inference import track_video
+    return track_video(kwargs.get("image"), latitude=kwargs.get("latitude"), longitude=kwargs.get("longitude"),
+                       bus_id=kwargs.get("bus_id"), camera_id=kwargs.get("camera_id"))
+
+
+def _tier3_adapter(**kwargs):
+    from ai.mva.inference import create_violation_event
+    violation = os.getenv("TIER3_DEFAULT_VIOLATION", "TRAFFIC_RULE_VIOLATION")
+    return create_violation_event(violation_type=violation, **kwargs)
+
+
+def build_pipeline() -> UrbanSensePipeline:
+    """Build configured adapters; weights are loaded lazily on invocation."""
+    return UrbanSensePipeline(
+        tier1=_tier1_adapter if os.getenv("TIER1_MODEL_PATH") else None,
+        tier2=_tier2_adapter if os.getenv("TIER2_MODEL_PATH") or os.getenv("TIER2_ENABLED", "false").lower() == "true" else None,
+        tier3=_tier3_adapter if os.getenv("TIER3_PLATE_MODEL_PATH") else None,
+    )
 
 
 def build_demo_pipeline() -> UrbanSensePipeline:
