@@ -12,6 +12,7 @@ load_dotenv()
 
 from backend.pipeline import build_pipeline
 from backend.schemas.events import EventBatch
+from backend.routers.tomtom_proxy import router as tomtom_proxy_router
 from backend.services.tomtom import flow_segment
 
 app = FastAPI(
@@ -27,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(tomtom_proxy_router)
 
 pipeline = build_pipeline()
 
